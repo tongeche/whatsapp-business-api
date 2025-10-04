@@ -46,10 +46,31 @@ exports.handler = async (event, context) => {
     
     if (!response.ok) {
       console.error('WA send failed:', data);
+      
+      // Enhanced error response with troubleshooting info
+      const errorResponse = {
+        ...data,
+        troubleshooting: {
+          status: response.status,
+          commonSolutions: {
+            code10: "Permission error - Check if your phone number is added to test recipients in Meta Developer Console",
+            code100: "Invalid parameter - Check phone number format (must include country code)",
+            code131: "User limit reached - Verify your app's messaging limit",
+            tokenExpired: "Token may be expired - Generate a new access token"
+          },
+          nextSteps: [
+            "1. Add recipient phone number to test list in Meta Developer Console",
+            "2. Verify phone number format includes country code (e.g., +254712345678)",
+            "3. Check if WhatsApp Business Account is verified",
+            "4. Ensure app has whatsapp_business_messaging permissions"
+          ]
+        }
+      };
+      
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify(data),
+        body: JSON.stringify(errorResponse, null, 2),
       };
     }
 
