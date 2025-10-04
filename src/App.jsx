@@ -27,6 +27,25 @@ export default function App() {
     }
   }
 
+  async function sendTemplate(e) {
+    e.preventDefault()
+    setLoading(true)
+    setResp(null)
+    try {
+      const r = await fetch('/api/send-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to })
+      })
+      const data = await r.json()
+      setResp(data)
+    } catch (err) {
+      setResp({ error: err.message })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function loadLeads() {
     try {
       const r = await fetch('/api/get-leads')
@@ -88,7 +107,7 @@ export default function App() {
               <input
                 value={to}
                 onChange={e => setTo(e.target.value)}
-                placeholder="2547XXXXXXXX"
+                placeholder="351931608896"
                 style={{ width: '100%', padding: 8, marginTop: 4 }}
                 required
               />
@@ -104,9 +123,18 @@ export default function App() {
                 required
               />
             </label>
-            <button disabled={loading} style={{ padding: '10px 14px', background: '#059669', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-              {loading ? 'Sending…' : 'Send via WhatsApp'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button disabled={loading} style={{ padding: '10px 14px', background: '#059669', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', flex: 1 }}>
+                {loading ? 'Sending…' : 'Send Custom Message'}
+              </button>
+              <button 
+                disabled={loading} 
+                onClick={(e) => sendTemplate(e)}
+                style={{ padding: '10px 14px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', flex: 1 }}
+              >
+                {loading ? 'Sending…' : 'Send Template (Works Now!)'}
+              </button>
+            </div>
           </form>
 
           {resp && (
