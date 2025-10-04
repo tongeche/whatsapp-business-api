@@ -1,3 +1,5 @@
+const { supabase } = require('../../lib/supabase');
+
 const TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'mywhatsappverify123';
@@ -46,11 +48,37 @@ exports.handler = async (event, context) => {
       if (msgs?.length) {
         const m = msgs[0];
         console.log('[INBOUND]', { from: m.from, type: m.type, text: m.text?.body });
+        
+        // Try to save to database (we'll create a messages table)
+        try {
+          await supabase.from('whatsapp_messages').insert({
+            message_id: m.id,
+            from_phone: m.from,
+            to_phone: PHONE_NUMBER_ID,
+            message_type: m.type,
+            message_body: m.text?.body || '',
+            timestamp: m.timestamp,
+            raw_data: JSON.stringify(m),
+            direction: 'inbound'
+          });
+        } catch (dbError) {
+          console.log('Could not save message to DB:', dbError.message);
+        }
       }
 
       if (statuses?.length) {
         const s = statuses[0];
         console.log('[STATUS]', { id: s.id, status: s.status, timestamp: s.timestamp });
+        
+        // Try to save status update to database
+        try {
+          await supabase.from('whatsapp_messages').update({
+            status: s.status,
+            status_timestamp: s.timestamp
+          }).eq('message_id', s.id);
+        } catch (dbError) {
+          console.log('Could not update message status in DB:', dbError.message);
+        }
       }
 
       return { statusCode: 200, headers };
