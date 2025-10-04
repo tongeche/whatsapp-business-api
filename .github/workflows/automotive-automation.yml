@@ -1,0 +1,44 @@
+name: Automotive Business Automation
+
+on:
+  schedule:
+    # Run hourly automation (every hour)
+    - cron: '0 * * * *'
+    # Run daily automation (every day at 9 AM UTC)
+    - cron: '0 9 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      automation_type:
+        description: 'Type of automation to run'
+        required: true
+        default: 'hourly'
+        type: choice
+        options:
+          - hourly
+          - daily
+
+jobs:
+  automation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Run Hourly Automation
+        if: github.event.schedule == '0 * * * *' || github.event.inputs.automation_type == 'hourly'
+        run: |
+          curl -X GET "https://cute-tiramisu-05adc3.netlify.app/.netlify/functions/automation-cron?interval=hourly" \
+            -H "Content-Type: application/json" \
+            --max-time 300
+      
+      - name: Run Daily Automation
+        if: github.event.schedule == '0 9 * * *' || github.event.inputs.automation_type == 'daily'
+        run: |
+          curl -X GET "https://cute-tiramisu-05adc3.netlify.app/.netlify/functions/automation-cron?interval=daily" \
+            -H "Content-Type: application/json" \
+            --max-time 300
+      
+      - name: Log Automation Status
+        run: |
+          echo "Automotive automation completed at $(date)"
+          echo "Automation type: ${{ github.event.inputs.automation_type || 'scheduled' }}"

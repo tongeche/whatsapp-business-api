@@ -1,0 +1,33 @@
+# Netlify Build Configuration
+# Add this to your existing netlify.toml
+
+# Cron automation scheduling
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+
+# Background function for automation
+[[functions]]
+  function = "automation-cron"
+  path = "/.netlify/functions/automation-cron"
+
+# Environment-specific settings
+[build.environment]
+  NETLIFY_BUILD_LIFECYCLE_API = "v1"
+
+# Deployment context for production
+[context.production]
+  environment = { AUTOMATION_ENABLED = "true" }
+
+# NOTE: Netlify doesn't support native cron jobs
+# For scheduled automation, you'll need to use:
+# 1. External cron service (cron-job.org, easycron.com)
+# 2. GitHub Actions with scheduled workflow
+# 3. Zapier/IFTTT webhooks
+# 4. AWS CloudWatch Events + Lambda (if using AWS)
+
+# Example external cron URLs:
+# Hourly: https://cute-tiramisu-05adc3.netlify.app/.netlify/functions/automation-cron?interval=hourly
+# Daily: https://cute-tiramisu-05adc3.netlify.app/.netlify/functions/automation-cron?interval=daily

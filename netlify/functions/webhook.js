@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { AutomationMaster } = require('../../lib/automation-master');
 
 // Initialize Supabase client directly in the function
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -54,8 +55,14 @@ exports.handler = async (event, context) => {
         const m = msgs[0];
         console.log('[INBOUND]', { from: m.from, type: m.type, text: m.text?.body });
         
-        // LEAD CAPTURE SYSTEM
-        await processIncomingMessage(m);
+        try {
+          // LEAD CAPTURE SYSTEM
+          const contactProfile = value?.contacts?.[0]?.profile || {};
+          await processIncomingMessage(m, contactProfile);
+          console.log('[SUCCESS] Lead processing completed');
+        } catch (leadError) {
+          console.error('[ERROR] Lead processing failed:', leadError);
+        }
       }
 
       if (statuses?.length) {
@@ -84,11 +91,15 @@ exports.handler = async (event, context) => {
 };
 
 // LEAD CAPTURE SYSTEM
-async function processIncomingMessage(message) {
+async function processIncomingMessage(message, contactProfile = {}) {
   try {
+    console.log('[PROCESS] Starting lead processing for message:', message);
+    
     const phoneNumber = message.from;
     const messageBody = message.text?.body || '';
     const messageType = message.type;
+    
+    console.log('[PROCESS] Extracted data:', { phoneNumber, messageBody, messageType });
     
     // Normalize phone number (remove + and country code variations)
     const normalizedPhone = phoneNumber.replace(/^\+/, '');
@@ -96,49 +107,99 @@ async function processIncomingMessage(message) {
     // Extract intent from message using keywords
     const intent = extractIntent(messageBody);
     
-    // Check if lead already exists
+    console.log('[PROCESS] Intent extracted:', intent);
+    
+    // Check if lead already exists by phone number
+    console.log('[PROCESS] Checking for existing lead with phone:', phoneNumber);
     const { data: existingLead, error: findError } = await supabase
       .from('leads')
       .select('*')
-      .eq('normalized_phone', normalizedPhone)
+      .eq('phone', phoneNumber)
       .single();
     
-    if (existingLead) {
-      // Update existing lead
-      await updateExistingLead(existingLead, messageBody, intent);
-    } else {
-      // Create new lead
-      await createNewLead(phoneNumber, normalizedPhone, messageBody, intent);
+    if (findError && findError.code !== 'PGRST116') {
+      console.error('[ERROR] Database query error:', findError);
+      throw findError;
     }
     
+    console.log('[PROCESS] Existing lead check result:', { existingLead: !!existingLead, findError: findError?.code });
+    
+    let leadId;
+    
+    if (existingLead) {
+      console.log('[PROCESS] Updating existing lead:', existingLead.id);
+      await updateExistingLead(existingLead, messageBody, intent);
+      leadId = existingLead.id;
+    } else {
+      console.log('[PROCESS] Creating new lead');
+      leadId = await createNewLead(phoneNumber, normalizedPhone, messageBody, intent, contactProfile);
+    }
+
+    // 🤖 RUN INTELLIGENT AUTOMATION SYSTEM
+    if (leadId) {
+      console.log('[AUTOMATION] Running intelligent automation for lead:', leadId);
+      try {
+        const automationResult = await AutomationMaster.processIncomingMessage(
+          phoneNumber, 
+          messageBody, 
+          leadId
+        );
+        console.log('[AUTOMATION] Automation completed:', automationResult);
+      } catch (automationError) {
+        console.error('[AUTOMATION ERROR]', automationError);
+        // Don't fail the webhook if automation fails
+      }
+    }
+
     // Log the message for tracking
+    console.log('[PROCESS] Logging WhatsApp message');
     await logWhatsAppMessage(message);
     
+    console.log('[PROCESS] Lead processing completed successfully');
+    
   } catch (error) {
-    console.error('Lead processing error:', error);
+    console.error('[ERROR] Lead processing error:', error);
+    throw error;
   }
 }
 
-async function createNewLead(phoneNumber, normalizedPhone, messageBody, intent) {
+// Generate a UUID
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+async function createNewLead(phoneNumber, normalizedPhone, messageBody, intent, contactProfile = {}) {
   try {
+    // Extract email if provided in contact name or profile
+    const contactName = contactProfile.name || '';
+    const emailMatch = contactName.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    const extractedEmail = emailMatch ? emailMatch[1] : null;
+    
     const leadData = {
+      id: generateUUID(),
       phone: phoneNumber,
-      normalized_phone: normalizedPhone,
+      email: extractedEmail,
+      name: extractedEmail ? null : contactName, // Use name if no email found
       source: 'whatsapp',
       status: 'new',
       intent: intent,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      // You can add your default tenant_id here
       tenant_id: process.env.DEFAULT_TENANT_ID || null,
       automation_status_reason: 'whatsapp_inbound_message',
       automation_status_at: new Date().toISOString(),
       meta: JSON.stringify({
         first_message: messageBody,
         whatsapp_contact: true,
-        initial_contact_date: new Date().toISOString()
+        initial_contact_date: new Date().toISOString(),
+        normalized_phone: normalizedPhone,
+        contact_profile: contactProfile
       })
     };
+    
+    console.log('[CREATE] Attempting to insert lead data:', leadData);
     
     const { data, error } = await supabase
       .from('leads')
@@ -147,15 +208,21 @@ async function createNewLead(phoneNumber, normalizedPhone, messageBody, intent) 
       .single();
     
     if (error) {
-      console.error('Error creating lead:', error);
+      console.error('[ERROR] Error creating lead:', error);
+      throw error;
     } else {
-      console.log('✅ New lead created:', data.id);
+      console.log('[SUCCESS] ✅ New lead created:', data.id);
       
       // Send welcome message
+      console.log('[CREATE] Sending welcome message');
       await sendWelcomeMessage(phoneNumber, intent);
+      
+      // Return the lead ID for automation
+      return data.id;
     }
   } catch (error) {
     console.error('Create lead error:', error);
+    throw error;
   }
 }
 
@@ -172,7 +239,6 @@ async function updateExistingLead(existingLead, messageBody, intent) {
     const { error } = await supabase
       .from('leads')
       .update({
-        updated_at: new Date().toISOString(),
         intent: intent || existingLead.intent,
         automation_status_reason: 'whatsapp_follow_up',
         automation_status_at: new Date().toISOString(),
